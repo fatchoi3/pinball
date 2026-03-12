@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import Matter from 'matter-js';
 
 const PinballRace = ({ ballConfigs, isPaused, onBallFinish, shuffleKey }) => {
+  // 1. 물리 엔진 핵심 객체들을 useRef로 관리하여 리렌더링 시에도 상태를 유지합니다.
   const sceneRef = useRef(null);
   const engineRef = useRef(Matter.Engine.create());
   const runnerRef = useRef(Matter.Runner.create());
@@ -10,12 +11,13 @@ const PinballRace = ({ ballConfigs, isPaused, onBallFinish, shuffleKey }) => {
     const { Engine, Render, Runner, Bodies, Composite, Events, Body } = Matter;
     const engine = engineRef.current;
 
-    // [추가] 공의 속도를 전체적으로 반(0.5)으로 줄입니다. (기본값 1)
+    // 게임의 전반적인 속도감을 조절합니다 (0.5는 2배 느리게)
     engine.timing.timeScale = 0.5;
-    
-    // 1. 월드 비우기 (중복 생성 방지)
+
+    // 새로운 게임 시작 시 이전의 물리 객체들을 모두 제거합니다.
     Composite.clear(engine.world, false);
 
+    // 2. 렌더러 설정: 화면 크기, 배경색, 와이어프레임 여부 등
     const render = Render.create({
       element: sceneRef.current,
       engine: engine,
@@ -27,220 +29,260 @@ const PinballRace = ({ ballConfigs, isPaused, onBallFinish, shuffleKey }) => {
       }
     });
 
-    // 벽 설정 (높이에 맞춰 조정)
-    const ground = Bodies.rectangle(500, 2000, 1000, 40, { isStatic: true, render: { fillStyle: '#334155' } });
-    const leftWall = Bodies.rectangle(0, 600, 20, 2750, { isStatic: true, render: { fillStyle: '#334155' } });
-    const rightWall = Bodies.rectangle(1000, 600, 20, 2750, { isStatic: true, render: { fillStyle: '#334155' } });
-    const sensor = Bodies.rectangle(500, 1980, 1000, 10, { 
-      isStatic: true, 
-      isSensor: true, 
-      label: 'finish_line', // 라벨 부여
-      render: { fillStyle: 'red' } 
-    });
-    // const sensor = Bodies.rectangle(225, 1180, 450, 10, { isStatic: true, isSensor: true, render: { fillStyle: 'transparent' } });
+    // --- [팩토리 함수] 동일한 설정을 가진 객체 생성을 자동화합니다 ---
+
+    // 일반적인 고정 벽 생성
+    const createWall = (x, y, w, h) => 
+      Bodies.rectangle(x, y, w, h, { isStatic: true, render: { fillStyle: '#334155' } });
     
-    // 2. 다양한 장애물 배치 (다양한 레이아웃)
-    const obstacles = [];
-    
-    // 섹션 1: 기본 핀볼 구역 (상단)
-    for (let r = 0; r < 5; r++) {
-      for (let c = 0; c < 19; c++) {
-        obstacles.push(Bodies.circle(c * 50 + (r % 2 === 0 ? 25 : 50), r * 60 + 250, 6, { isStatic: true, render: { fillStyle: '#94a3b8' } }));
-      }
-    }
+    // 기울기를 가진 고정 장애물 생성
+    const createStaticRect = (x, y, w, h, angle = 0) => 
+      Bodies.rectangle(x, y, w, h, { isStatic: true, angle, render: { fillStyle: '#475569' } });
 
-    // 섹션 2: 중앙 깔때기 구간
-    obstacles.push(Bodies.rectangle(120, 650, 200, 20, { isStatic: true, angle: Math.PI * 0.1, render: { fillStyle: '#475569' } }));
-    obstacles.push(Bodies.rectangle(370, 650, 200, 20, { isStatic: true, angle: -Math.PI * 0.1, render: { fillStyle: '#475569' } }));
-    obstacles.push(Bodies.rectangle(630, 650, 200, 20, { isStatic: true, angle: Math.PI * 0.1, render: { fillStyle: '#475569' } }));
-    obstacles.push(Bodies.rectangle(880, 650, 200, 20, { isStatic: true, angle: -Math.PI * 0.1, render: { fillStyle: '#475569' } }));
-
-    // 섹션 3: 지그재그 슬라이드 구간 (하단)
-    for (let i = 0; i < 8; i++) {
-      let xPos, yPos;
-      if(i < 4){
-        xPos = i % 2 === 0 ? 120 : 330;
-        yPos = 800 + (i * 100);
-      } else{
-        xPos = i % 2 === 0 ? 630 : 880;
-        yPos = 800 + ((i - 4) * 100);
-      }
-      obstacles.push(Bodies.rectangle(xPos, yPos, 150, 15, { isStatic: true, angle: i % 2 === 0 ? 0.2 : -0.2, render: { fillStyle: '#64748b' } }));
-    }
-
-    // 공 생성 (낱개 랜덤 셔플 로직 유지)
-    const colors = ['#ff4757', '#1e90ff', '#2ed573', '#ffa502', '#eccc68', '#a29bfe'];
-    let allBallsPool = [];
-    ballConfigs.forEach((conf, idx) => {
-      for (let i = 0; i < conf.count; i++) {
-        allBallsPool.push({ name: conf.name, color: colors[idx % colors.length] });
-      }
-    });
-    // Fisher-Yates Shuffle
-    for (let i = allBallsPool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [allBallsPool[i], allBallsPool[j]] = [allBallsPool[j], allBallsPool[i]];
-    }
-
-    // 가로 배치
-    const balls = allBallsPool.map((ballData, i) => {
-      const ballsPerRow = 25; // 한 줄에 배치할 공의 개수
-      const ballGap = 35;     // 공 사이의 가로/세로 간격
-      
-      const col = i % ballsPerRow;        // 현재 줄에서 몇 번째인지
-      const row = Math.floor(i / ballsPerRow); // 몇 번째 줄인지
-    
-      // 1. 현재 줄의 전체 폭 계산
-      // (현재 줄에 공이 몇 개 있는지 확인하여 정중앙을 맞춥니다)
-      const currentRowCount = Math.min(allBallsPool.length - row * ballsPerRow, ballsPerRow);
-      const rowWidth = (currentRowCount - 1) * ballGap;
-      
-      // 2. 시작 X 좌표 계산 (중앙인 500에서 줄 폭의 절반만큼 왼쪽으로)
-      const startX = 500 - (rowWidth / 2);
-    
-      return Bodies.circle(
-        startX + (col * ballGap), // X 위치: 시작점 + (열 인덱스 * 간격)
-        60 + (row * ballGap),    // Y 위치: 상단 여백 100 + (행 인덱스 * 간격)
-        10, 
-        {
-          restitution: 0.7,
-          friction: 0.001,
-          label: ballData.name,
-          render: { fillStyle: ballData.color }
-        }
-      );
-    });
-
-    // --- 특수 장애물 (3번 부딪히면 사라짐) 생성 ---
-    const specialObstacles = [];
-    const createSpecialObstacle = (x, y, width = 60, height = 20) => {
-      const obstacle = Bodies.rectangle(x, y, width, height, {
-        isStatic: true,
-        label: 'special_block',
-        hitCount: 0,
-        render: {
-          fillStyle: '#fbbf24', // 노란색(황금색) 유지
-          strokeStyle: '#ffffff',
-          lineWidth: 2
-        }
+    // 3번 충돌 시 파괴되는 특수 블록 생성
+    const createSpecial = (x, y, w = 60, h = 20) => 
+      Bodies.rectangle(x, y, w, h, {
+        isStatic: true, 
+        label: 'special_block', 
+        hitCount: 0, // 충돌 횟수 저장용 커스텀 속성
+        render: { fillStyle: '#fbbf24', strokeStyle: '#ffffff', lineWidth: 2 }
       });
-      return obstacle;
+
+    // 움직이는 블록 생성 (좌우/위아래 공용)
+    const createMover = (x, y, w, h, type, speed, range, color) => {
+      const mover = Bodies.rectangle(x, y, w, h, { isStatic: true, label: type, render: { fillStyle: color } });
+      mover.moveSpeed = speed;   // 이동 속도
+      mover.moveRange = range;   // 이동 범위
+      mover.initialPos = type === 'h_mover' ? x : y; // 기준 위치 저장
+      mover.direction = 1;       // 현재 이동 방향 (1 또는 -1)
+      return mover;
     };
 
-    // 위치에 맞게 가로형 직사각형 배치
-    specialObstacles.push(createSpecialObstacle(60, 1450, 60, 20));
-    specialObstacles.push(createSpecialObstacle(140, 1450, 60, 20));
-    specialObstacles.push(createSpecialObstacle(220, 1450, 60, 20));
-    specialObstacles.push(createSpecialObstacle(300, 1450, 60, 20));
-    specialObstacles.push(createSpecialObstacle(380, 1450, 60, 20));
-    specialObstacles.push(createSpecialObstacle(460, 1450, 60, 20));
-    specialObstacles.push(createSpecialObstacle(540, 1450, 60, 20));
-    specialObstacles.push(createSpecialObstacle(620, 1450, 60, 20));
-    specialObstacles.push(createSpecialObstacle(700, 1450, 60, 20));
-    specialObstacles.push(createSpecialObstacle(780, 1450, 60, 20));
-    specialObstacles.push(createSpecialObstacle(860, 1450, 60, 20));
-    specialObstacles.push(createSpecialObstacle(940, 1450, 60, 20));
+    // 회전하는 막대 생성 함수
+    const createSpinner = (x, y, w, h, speed, color) => {
+      const spinner = Bodies.rectangle(x, y, w, h, { 
+        isStatic: true, 
+        label: 'spinner', 
+        render: { fillStyle: color } 
+      });
+      spinner.rotationSpeed = speed; // 회전 속도 (양수면 시계방향, 음수면 반시계)
+      return spinner;
+    };
 
-    specialObstacles.push(createSpecialObstacle(125, 1850, 100, 25));
-    specialObstacles.push(createSpecialObstacle(325, 1850, 100, 25));
-    specialObstacles.push(createSpecialObstacle(525, 1850, 100, 25));
-    specialObstacles.push(createSpecialObstacle(725, 1850, 100, 25));
-    specialObstacles.push(createSpecialObstacle(925, 1850, 100, 25));
+    // --- [데이터 정의] 실제 화면에 배치될 객체들의 리스트입니다 ---
 
-    Composite.add(engine.world, [ground, leftWall, rightWall, sensor, ...obstacles, ...balls, ...specialObstacles]);
+    const walls = [
+      // createWall(500, 2000, 1000, 40), // 바닥 (결승선 뒤쪽)
+      createWall(0, 600, 20, 2750),    // 왼쪽 외곽 벽
+      createWall(1000, 600, 20, 2750)  // 오른쪽 외곽 벽
+    ];
 
-    // 충돌 감지
-    const collisionHandler = (event) => {
-      event.pairs.forEach((pair) => {
-        const { bodyA, bodyB } = pair;
+    const staticObstacles = [
+      // 상단 깔때기(Funnel) 구간 배치
+      createStaticRect(120, 650, 200, 20, Math.PI * 0.1),
+      createStaticRect(370, 650, 200, 20, -Math.PI * 0.1),
+      createStaticRect(630, 650, 200, 20, Math.PI * 0.1),
+      createStaticRect(880, 650, 200, 20, -Math.PI * 0.1),
+      
+      // 하단 지그재그 슬라이드 구간 (반복문을 통한 효율적 생성)
+      ...Array.from({ length: 8 }).map((_, i) => {
+        const x = i < 4 ? (i % 2 === 0 ? 120 : 330) : (i % 2 === 0 ? 630 : 880);
+        const y = 800 + (i % 4 * 100);
+        return createStaticRect(x, y, 150, 15, i % 2 === 0 ? 0.2 : -0.2);
+      })
+    ];
 
-        // 특수 장애물 충돌 체크
+    // 무빙 블록 설정 (랜덤 속도 부여)
+    const movingObstacles = [
+      createMover(500, 1300, 200, 20, 'h_mover', Math.random() * 5 + 2, 200, '#34d399'),
+      createMover(200, 1550, 200, 20, 'v_mover', Math.random() * 5 + 2, 150, '#60a5fa')
+    ];
+
+    // 특수 장애물 배치 (좌표 리스트를 기반으로 생성)
+    const specialObstacles = [
+      ...[380, 460, 540, 620, 700, 780, 860, 940].map(x => createSpecial(x, 1450)),
+      ...[200, 400, 600, 800].map(x => createSpecial(x, 1750, 100, 25)),
+      ...[100, 300, 500, 700, 900].map(x => createSpecial(x, 1850, 100, 25)),
+      ...[100, 300, 500, 700, 900].map(x => createSpecial(x, 1950, 100, 25)),
+    ];
+
+    // 회전 장애물 설정
+    const spinners = [
+      createSpinner(100, 1300, 120, 15, -0.06, '#f472b6'), // 왼쪽 소형 (반시계)
+      createSpinner(500, 900, 120, 15, -0.06, '#f472b6'), // 중앙 소형 (반시계)
+      createSpinner(850, 1300, 120, 15, 0.06, '#f472b6'),   // 오른쪽 소형 (시계)
+      createSpinner(750, 1650, 180, 15, 0.04, '#f472b6') // 중앙 대형 회전판 (시계)
+    ];
+
+    // 결승선 센서 (물리적 충돌은 없지만 이벤트만 감지)
+    const sensor = Bodies.rectangle(500, 1980, 1000, 10, { 
+      isStatic: true, isSensor: true, label: 'finish_line', render: { fillStyle: 'red' } 
+    });
+
+    // --- [공 생성 및 셔플] ---
+    const colors = ['#ff4757', '#1e90ff', '#2ed573', '#ffa502', '#eccc68', '#a29bfe'];
+    let pool = [];
+    ballConfigs.forEach((c, i) => {
+      for (let j = 0; j < c.count; j++) pool.push({ name: c.name, color: colors[i % colors.length] });
+    });
+    pool.sort(() => Math.random() - 0.5); // 낱개 단위 셔플
+
+    // 공들을 화면 상단 중앙에 행렬 형태로 배치
+    const balls = pool.map((data, i) => {
+      const col = i % 25; 
+      const row = Math.floor(i / 25);
+      const currentRowCount = Math.min(pool.length - row * 25, 25);
+      const startX = 500 - ((currentRowCount - 1) * 35 / 2); // 중앙 정렬 계산
+      return Bodies.circle(startX + col * 35, 60 + row * 35, 10, {
+        restitution: 0.7, // 탄성
+        // friction: 0.001,  // 마찰
+        stuckFrames: 0,
+        label: data.name, 
+        render: { fillStyle: data.color }
+      });
+    });
+
+    // 모든 객체를 월드에 한 번에 추가하여 성능 최적화
+    Composite.add(engine.world, [...walls, sensor, ...staticObstacles, ...movingObstacles, ...specialObstacles, ...balls, ...spinners]);
+
+    // --- [이벤트 로직] ---
+
+    // 1. 매 프레임 업데이트 전 실행 (무빙 블록의 움직임 제어)
+    const onUpdate = () => {
+
+      // --- 공 멈춤 방지 (Anti-Stuck) 로직 ---
+      balls.forEach(ball => {
+        // 공의 현재 속도 크기 계산 (피타고라스 정리)
+        const speed = Math.sqrt(Math.pow(ball.velocity.x, 2) + Math.pow(ball.velocity.y, 2));
+
+        // 속도가 아주 낮을 때 (0.2 미만)
+        if (speed < 0.2) {
+          ball.stuckFrames += 1;
+        } else {
+          ball.stuckFrames = 0; // 움직이고 있다면 카운트 리셋
+        }
+
+        // 약 2초(120프레임 기준) 동안 멈춰있다면 점프!
+        if (ball.stuckFrames > 120) {
+          // 1. 임의의 각도 설정 (예: -45도 ~ -135도 사이 = 위쪽 방향 위주)
+          // 0도는 오른쪽, -90도(Math.PI / -2)가 정위쪽입니다.
+          const randomAngle = (Math.random() * Math.PI) + Math.PI; // 180도 ~ 360도 (위쪽 반원)
+          
+          // 2. 힘의 크기 설정
+          const forceMagnitude = 0.05; 
+          
+          // 3. 각도를 기반으로 X, Y 힘의 성분 계산
+          const jumpForce = {
+            x: Math.cos(randomAngle) * forceMagnitude,
+            y: Math.sin(randomAngle) * forceMagnitude
+          };
+          
+          // 4. 힘 적용
+          Body.applyForce(ball, ball.position, jumpForce);
+          
+          // [추가] 회전력도 임의로 주어 더 역동적으로 보이게 함
+          Body.setAngularVelocity(ball, (Math.random() - 0.5) * 0.2);
+          ball.stuckFrames = 0; // 점프 후 카운트 리셋
+          
+          // [시각적 피드백] 점프할 때 살짝 반짝이게 할 수도 있습니다.
+          ball.render.opacity = 0.5;
+          setTimeout(() => { ball.render.opacity = 1; }, 200);
+        }
+      });
+
+      movingObstacles.forEach(m => {
+        const isH = m.label === 'h_mover';
+        const currentPos = isH ? m.position.x : m.position.y;
+        
+        // 이동 범위 끝에 도달하면 방향 전환
+        if (currentPos > m.initialPos + m.moveRange) m.direction = -1;
+        else if (currentPos < m.initialPos - m.moveRange) m.direction = 1;
+
+        const vel = m.moveSpeed * m.direction;
+        if (isH) {
+          Body.setPosition(m, { x: m.position.x + vel, y: m.position.y });
+          Body.setVelocity(m, { x: vel, y: 0 }); // 속도를 명시해야 충돌이 자연스러움
+        } else {
+          Body.setPosition(m, { x: m.position.x, y: m.position.y + vel });
+          Body.setVelocity(m, { x: 0, y: vel });
+        }
+      });
+
+      // 회전 블록 업데이트
+      spinners.forEach(s => {
+        // 현재 각도에 회전 속도를 더함
+        const newAngle = s.angle + s.rotationSpeed;
+        Matter.Body.setAngle(s, newAngle);
+        // 물리적 마찰력을 전달하기 위해 각속도(angularVelocity)도 설정해주는 것이 좋습니다.
+        Matter.Body.setAngularVelocity(s, s.rotationSpeed);
+      });
+    };
+
+    // 2. 충돌 이벤트 발생 시 처리
+    const onCollision = (event) => {
+      event.pairs.forEach(({ bodyA, bodyB }) => {
+        // 특수 장애물과 부딪힌 경우
         const isSpecial = bodyA.label === 'special_block' || bodyB.label === 'special_block';
         if (isSpecial) {
-          const obstacle = bodyA.label === 'special_block' ? bodyA : bodyB;
+          const obs = bodyA.label === 'special_block' ? bodyA : bodyB;
           const ball = bodyA.label === 'special_block' ? bodyB : bodyA;
-
+          
           if (ball.label && !ball.label.includes('Body')) {
-            // 1. 공을 멀리 날려보내기 (반동 효과)
-            const forceMagnitude = 20; 
-            // 튕겨나가는 속도 크기 (숫자가 클수록 더 멀리 날아갑니다. 15~25 사이 추천)
-            const speed = 20;
-            const angle = Math.atan2(ball.position.y - obstacle.position.y, ball.position.x - obstacle.position.x);
-            // 속도 직접 부여
-            Body.setVelocity(ball, {
-              x: Math.cos(angle) * speed,
-              y: Math.sin(angle) * speed
-            });
-            // Body.applyForce(ball, ball.position, {
-            //   x: Math.cos(angle) * forceMagnitude,
-            //   y: Math.sin(angle) * forceMagnitude
-            // });
-
-            // [추가] 회전력까지 주면 더 역동적입니다.
-            Body.setAngularVelocity(ball, (Math.random() - 0.5) * 0.5);
-            // 2. 충돌 횟수 증가 및 파괴
-            obstacle.hitCount += 1;
+            // 입사각 계산하여 공을 강력하게 튕겨냄 (반동 로직)
+            const angle = Math.atan2(ball.position.y - obs.position.y, ball.position.x - obs.position.x);
+            Body.setVelocity(ball, { x: Math.cos(angle) * 20, y: Math.sin(angle) * 20 });
             
-            // 시각적 피드백 (부딪힐 때마다 투명도 변경)
-            obstacle.render.opacity = 1 - (obstacle.hitCount * 0.3);
-
-            if (obstacle.hitCount >= 3) {
-              Composite.remove(engine.world, obstacle);
-            }
+            // 내구도 감소 및 투명도 변화 피드백
+            obs.hitCount++;
+            obs.render.opacity = 1 - (obs.hitCount * 0.3);
+            if (obs.hitCount >= 3) Composite.remove(engine.world, obs); // 3번 충돌 시 제거
           }
         }
 
-        // 한쪽이 센서(finish_line)인 경우
+        // 결승선 통과 시 처리
         if (bodyA.label === 'finish_line' || bodyB.label === 'finish_line') {
           const ball = bodyA.label === 'finish_line' ? bodyB : bodyA;
-          
-          // 공인 경우에만 처리
           if (ball.label && !ball.label.includes('Body')) {
-            ball.collisionFilter.mask = 0; // 중복 카운트 방지 위해 충돌 무시
-            onBallFinish(ball.label);
-
-            // [추가] 공이 골인하면 자동으로 화면을 결승점 쪽으로 스크롤
-            // sceneRef.current.parentElement.scrollTo({
-            //   top: 1300,
-            //   behavior: 'smooth'
-            // });
+            ball.collisionFilter.mask = 0; // 한 번 골인하면 다른 물체와 충돌 안 함
+            onBallFinish(ball.label);      // 부모 컴포넌트로 데이터 전달
           }
         }
       });
     };
-    // 충돌 센서
-    Events.on(engine, 'collisionStart', collisionHandler);
 
+    Events.on(engine, 'beforeUpdate', onUpdate);
+    Events.on(engine, 'collisionStart', onCollision);
+    
+    // 3. 렌더링 직후 공 위에 이름 그리기 (Canvas API 직접 사용)
     Events.on(render, 'afterRender', () => {
-      const context = render.context;
+      const { context } = render;
       context.font = 'bold 10px Arial';
       context.textAlign = 'center';
       context.fillStyle = 'white';
-
-      // 월드의 모든 바디 중 공(Circle)인 것만 찾아 텍스트를 입힙니다.
-      const allBodies = Composite.allBodies(engine.world);
-      allBodies.forEach(body => {
-        if (body.label && body.label !== 'Circle Body' && body.label !== 'Rectangle Body' && body.label !==  'finish_line' && body.label !== 'special_block') {
-          context.fillText(body.label, body.position.x, body.position.y - 15); // 공 살짝 위에 이름 표시
+      
+      Composite.allBodies(engine.world).forEach(b => {
+        // 이름 표시가 필요한 객체(공)만 필터링
+        if (b.label && !['Circle Body', 'Rectangle Body', 'finish_line', 'special_block', 'h_mover', 'v_mover', 'spinner'].includes(b.label)) {
+          context.fillText(b.label, b.position.x, b.position.y - 15);
         }
       });
     });
+
     Render.run(render);
 
+    // 컴포넌트가 사라지거나 재시작될 때 메모리 누수 방지를 위해 모든 리스너와 캔버스를 제거합니다.
     return () => {
-      Events.off(engine, 'collisionStart', collisionHandler);
+      Events.off(engine, 'beforeUpdate', onUpdate);
+      Events.off(engine, 'collisionStart', onCollision);
       Render.stop(render);
       Engine.clear(engine);
-      if (render.canvas) render.canvas.remove();
+      render.canvas.remove();
     };
-  }, [ballConfigs, shuffleKey]);
+  }, [ballConfigs, shuffleKey]); // 설정이나 셔플키가 바뀔 때만 게임 재시작
 
+  // 게임 일시정지/재개 제어
   useEffect(() => {
-    if (isPaused) {
-      Matter.Runner.stop(runnerRef.current);
-    } else {
-      Matter.Runner.run(runnerRef.current, engineRef.current);
-    }
+    isPaused ? Matter.Runner.stop(runnerRef.current) : Matter.Runner.run(runnerRef.current, engineRef.current);
   }, [isPaused]);
 
   return <div ref={sceneRef} />;
