@@ -59,17 +59,7 @@ function App() {
 
   return (
     <div className="app-layout">
-      <aside className="side-panel leaderboard">
-        <h3>📊 순위표</h3>
-        <div className="rank-list">
-          {finishers.map((name, i) => (
-            <div key={i} className={`rank-item ${winner === name && i+1 === Number(targetRank) ? 'is-winner' : ''}`}>
-              {i + 1}위: {name}
-            </div>
-          ))}
-        </div>
-        {gameState === 'FINISHED' && <div className="mini-result-banner">🎉 {winner} 당첨!</div>}
-      </aside>
+      
 
       <main className="main-content">
         <header><h1>새벽이슬 청년부 핀볼겜</h1></header>
@@ -83,6 +73,18 @@ function App() {
           />
         </div>
       </main>
+
+      {/* 순위표 사이드바 */}
+    <aside className="side-panel leaderboard">
+      <h3>📊 실시간 순위</h3>
+      <div className="rank-list">
+        {finishers.map((name, i) => (
+          <div key={i} className={`rank-item ${winner === name && i+1 === Number(targetRank) ? 'is-winner' : ''}`}>
+            {i + 1}위: {name}
+          </div>
+        ))}
+      </div>
+    </aside>
 
       <aside className="side-panel settings">
         <h3>⚙️ 설정 및 제어</h3>

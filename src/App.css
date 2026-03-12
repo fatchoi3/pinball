@@ -279,3 +279,71 @@ header h1 {
   background: #475569;
   border-radius: 10px;
 }
+
+/* --- 갤럭시 S21 및 모바일 반응형 대응 --- */
+
+@media (max-width: 1024px) {
+  body {
+    overflow-y: auto; /* 모바일에서는 전체 페이지 스크롤 허용 */
+  }
+
+  .app-layout {
+    flex-direction: column; /* 가로 배열을 세로 배열로 변경 */
+    align-items: center;
+    padding: 10px;
+    gap: 15px;
+  }
+
+  /* 메인 콘텐츠(게임화면)를 가장 위로 올림 */
+  .main-content {
+    order: 1; 
+    width: 100%;
+  }
+
+  .game-screen {
+    width: 100%;       /* 1000px 고정을 해제하고 부모 너비에 맞춤 */
+    max-width: 500px;  /* 폰에서 너무 길어지지 않게 가로 폭 제한 (취향껏 조절) */
+    height: 60vh;      /* 폰 높이의 60% 정도만 차지하도록 조절 */
+    border-width: 2px;
+  }
+
+  /* 중요: 1000px로 그려진 캔버스를 폰 너비에 맞춰 자동 축소 */
+  .game-screen canvas {
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  /* 설정창과 순위표를 아래로 내림 */
+  .side-panel {
+    order: 2;
+    width: 100%;      /* 250px 고정을 해제하고 꽉 차게 */
+    box-sizing: border-box;
+  }
+
+  header h1 {
+    font-size: 1.8rem; /* 모바일용 제목 크기 축소 */
+    text-align: center;
+  }
+
+  /* 입력창들이 모바일에서 너무 작지 않게 조정 */
+  .config-row input {
+    font-size: 16px; /* 아이폰/갤럭시에서 포커스 시 자동 줌 방지 */
+    padding: 10px;
+  }
+  
+  .mini-result-banner {
+    width: 80%;
+    text-align: center;
+    font-size: 1rem;
+  }
+}
+
+/* 아주 작은 화면 대응 (너비 380px 이하) */
+@media (max-width: 380px) {
+  header h1 {
+    font-size: 1.4rem;
+  }
+  .main-start-btn, .shuffle-btn {
+    padding: 12px;
+  }
+}
